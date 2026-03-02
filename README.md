@@ -1,35 +1,34 @@
 # imsg-forwarder
 
-Forward iMessages from your Mac to a Cloudflare Worker + D1 database in real time.
+Forward iMessages to a Cloudflare Worker + D1 database in real time using iOS Shortcuts.
 
-A compiled macOS daemon watches `~/Library/Messages/chat.db` for new messages via FSEvents and POSTs them to a self-hosted Cloudflare Worker, where they are stored in a D1 (SQLite) database queryable over HTTP.
+An iOS Shortcut automation fires on every incoming message and POSTs it to a self-hosted Cloudflare Worker, where it is stored in a D1 (SQLite) database queryable over HTTP.
 
 ## Architecture
 
 ```
-Mac (chat.db)
-  └── imsg-forwarder daemon
+iPhone (incoming message)
+  └── iOS Shortcut automation
         └── POST /messages  ──►  Cloudflare Worker
                                         └── D1 Database
                                               └── GET /messages
 ```
 
-- **Daemon** — native macOS binary (Bun-compiled), watches `chat.db`, resolves message text from both `text` and `attributedBody` columns, batches and forwards to the worker.
-- **Worker** — Cloudflare Worker (TypeScript), authenticated with a Bearer token, stores messages idempotently using the message GUID.
-- **Database** — Cloudflare D1 (SQLite), queryable by timestamp, sender, or chat identifier.
+- **iOS Shortcut** — triggers on every incoming message, sends sender + text to the worker
+- **Worker** — Cloudflare Worker (TypeScript), authenticated with a Bearer token, stores messages with a server-side timestamp
+- **Database** — Cloudflare D1 (SQLite), queryable by sender or timestamp
 
 ## Requirements
 
-- macOS (Apple Silicon or Intel)
-- [Bun](https://bun.sh) ≥ 1.0 (for building from source)
+- iPhone running iOS 17+
 - Cloudflare account (free tier is sufficient)
-- **Full Disk Access** granted to the process running the daemon (Terminal or your LaunchAgent binary)
+- [Bun](https://bun.sh) ≥ 1.0 (for building the management CLI from source)
 
 ## Installation
 
 ### Pre-built binary
 
-Download the latest binary from [Releases](../../releases) and place it in your PATH:
+Download the latest binary from [Releases](../../releases):
 
 ```bash
 sudo cp imsg-forwarder /usr/local/bin/imsg-forwarder
@@ -55,12 +54,12 @@ Output binaries:
 
 ## Configuration
 
-Copy the example config and fill in your values:
-
 ```bash
 mkdir -p ~/.imsg-forwarder
 cp config.example.yaml ~/.imsg-forwarder/config.yaml
 ```
+
+Edit `config.yaml`:
 
 ```yaml
 cloudflare:
@@ -69,8 +68,7 @@ cloudflare:
   worker_name: "imsg-forwarder"
   db_name: "imsg-forwarder"
 
-api_token: ""          # Shared secret for daemon → worker auth (openssl rand -hex 32)
-worker_url: ""         # Leave empty — populated automatically by --deploy
+api_token: ""          # Shared secret for Shortcut → worker auth (openssl rand -hex 32)
 ```
 
 Config is searched in order:
@@ -80,42 +78,26 @@ Config is searched in order:
 
 ### Cloudflare API token
 
-Create a token at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens) with these permissions:
+Create a token at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens) with:
 
 | Permission | Level |
 |---|---|
 | Workers Scripts — Edit | Account |
 | D1 — Edit | Account |
 
-## Usage
+## CLI usage
 
 ### Deploy
 
-Provisions the Cloudflare Worker and D1 database, then saves the worker URL to `~/.imsg-forwarder/state.json`.
+Provisions the Cloudflare Worker and D1 database.
 
 ```bash
 imsg-forwarder --deploy
 ```
 
-### Watch (forward messages)
-
-Starts the daemon. Watches `chat.db` via FSEvents with a 500 ms debounce and a 5 s fallback poll. On first run, skips existing messages and begins forwarding from the current position.
-
-```bash
-imsg-forwarder
-```
-
-### Dev mode
-
-Prints captured messages to stdout without forwarding. Useful for verifying Full Disk Access and testing the message parser. No config required.
-
-```bash
-imsg-forwarder --dev
-```
-
 ### Diagnostics
 
-Runs a suite of checks: chat.db access, config completeness, Cloudflare token validity, Workers/D1 permissions, and worker reachability.
+Checks config completeness, Cloudflare token validity, Workers/D1 permissions, and worker reachability.
 
 ```bash
 imsg-forwarder --doctor
@@ -129,61 +111,41 @@ Removes the Cloudflare Worker and D1 database.
 imsg-forwarder --undeploy
 ```
 
-## Run as a LaunchAgent
+## iOS Shortcut setup
 
-To start the daemon automatically on login and restart it on crash, install it as a macOS LaunchAgent.
+1. Open **Shortcuts** → **Automation** → **+** → **Message**
+2. Leave **Sender** and **Message Contains** blank — or set Message Contains to a single space `" "` if iOS requires a value
+3. Turn off **Ask Before Running**
+4. Add these actions:
 
-1. Copy and edit the example plist:
+| Action | Settings |
+|---|---|
+| **Get Contents of URL** | URL: `https://<worker>.workers.dev/messages`  Method: `POST`  Headers: `Authorization: Bearer <api_token>`  Body: JSON |
+| ↳ JSON body | `text` → Shortcut Input → Content  `sender` → Shortcut Input → Sender  `chat_identifier` → Shortcut Input → Sender |
+| **Get Dictionary from Input** | from URL result |
+| **Get Dictionary Value** | key: `ok` |
+| **If** value = `true` | Show Notification: "✓ Forwarded" |
+| **Otherwise** | Show Notification: "✗ Failed" → body: URL result |
 
-```bash
-cp com.imsg-forwarder.plist.example \
-   ~/Library/LaunchAgents/com.imsg-forwarder.plist
-```
-
-Edit the plist and replace `YOUR_USERNAME` with your macOS username in the log path fields.
-
-2. Load the agent:
-
-```bash
-launchctl bootstrap gui/$(id -u) \
-  ~/Library/LaunchAgents/com.imsg-forwarder.plist
-```
-
-3. Grant **Full Disk Access** to `/usr/local/bin/imsg-forwarder`:
-
-   **System Settings → Privacy & Security → Full Disk Access → + → `/usr/local/bin/imsg-forwarder`**
-
-   This is required once. FDA persists across restarts but must be re-granted if the binary path changes.
-
-4. Verify it is running:
-
-```bash
-launchctl print gui/$(id -u)/com.imsg-forwarder
-```
-
-To stop and unload:
-
-```bash
-launchctl bootout gui/$(id -u) \
-  ~/Library/LaunchAgents/com.imsg-forwarder.plist
-```
+5. Enable these settings on iPhone:
+   - **Settings → Shortcuts → Allow Access to Messages** → On
+   - **Settings → Shortcuts → Allow Notifications** → On
+   - **Settings → General → Background App Refresh** → On
 
 ## Querying messages
-
-The worker exposes a simple REST API, authenticated with your `api_token`.
 
 ```bash
 # Fetch latest 50 messages
 curl -H "Authorization: Bearer <api_token>" \
-  https://<worker-subdomain>.workers.dev/messages
+  https://<worker>.workers.dev/messages
 
 # Filter by sender
 curl -H "Authorization: Bearer <api_token>" \
-  "https://<worker-subdomain>.workers.dev/messages?sender=%2B15555550123"
+  "https://<worker>.workers.dev/messages?sender=%2B15555550123"
 
 # Paginate (before Unix timestamp)
 curl -H "Authorization: Bearer <api_token>" \
-  "https://<worker-subdomain>.workers.dev/messages?before=1700000000&limit=100"
+  "https://<worker>.workers.dev/messages?before=1700000000&limit=100"
 ```
 
 ### Response schema
@@ -193,24 +155,26 @@ curl -H "Authorization: Bearer <api_token>" \
   "messages": [
     {
       "id": 1,
-      "guid": "...",
       "text": "Hello",
       "sender": "+15555550123",
-      "is_from_me": 0,
       "chat_identifier": "+15555550123",
-      "timestamp": 1700000000,
-      "received_at": 1700000001
+      "received_at": 1700000000
     }
   ]
 }
 ```
 
-## How it works
+## Database schema
 
-1. `chokidar` watches `~/Library/Messages/` for FSEvents. On any change, a 500 ms debounce fires.
-2. The daemon queries `chat.db` for rows with `rowid > lastRowid`, reads both the `text` column and the binary `attributedBody` blob (NSKeyedArchiver plist, used for messages from external contacts), and resolves the plain text.
-3. New messages are POSTed as a batch to `POST /messages` on the worker. The worker inserts them with `INSERT OR IGNORE` (idempotent on GUID).
-4. `lastRowid` is persisted to `~/.imsg-forwarder/state.json` so the daemon resumes correctly after restart.
+```sql
+CREATE TABLE messages (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  text            TEXT,
+  sender          TEXT,
+  chat_identifier TEXT,
+  received_at     INTEGER NOT NULL DEFAULT (unixepoch())
+);
+```
 
 ## License
 

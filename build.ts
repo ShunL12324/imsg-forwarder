@@ -63,7 +63,6 @@ for (const [target, outName] of targets) {
 }
 
 console.log("\nBuild complete!");
-console.log("  Install (copy + codesign required after every update):");
+console.log("  Install:");
 console.log("    sudo cp dist/imsg-forwarder /usr/local/bin/imsg-forwarder");
-console.log(`    sudo codesign --force --sign - --identifier "com.imsg-forwarder" --requirements '=designated => identifier "com.imsg-forwarder"' /usr/local/bin/imsg-forwarder`);
-console.log("  Then: copy com.imsg-forwarder.plist.example → ~/Library/LaunchAgents/com.imsg-forwarder.plist");
+console.log("    sudo codesign --force --sign - /usr/local/bin/imsg-forwarder");
