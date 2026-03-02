@@ -113,24 +113,73 @@ imsg-forwarder --undeploy
 
 ## iOS Shortcut setup
 
-1. Open **Shortcuts** → **Automation** → **+** → **Message**
-2. Leave **Sender** and **Message Contains** blank — or set Message Contains to a single space `" "` if iOS requires a value
-3. Turn off **Ask Before Running**
-4. Add these actions:
+### 1. Enable required permissions
 
-| Action | Settings |
-|---|---|
-| **Get Contents of URL** | URL: `https://<worker>.workers.dev/messages`  Method: `POST`  Headers: `Authorization: Bearer <api_token>`  Body: JSON |
-| ↳ JSON body | `text` → Shortcut Input → Content  `sender` → Shortcut Input → Sender  `chat_identifier` → Shortcut Input → Sender |
-| **Get Dictionary from Input** | from URL result |
-| **Get Dictionary Value** | key: `ok` |
-| **If** value = `true` | Show Notification: "✓ Forwarded" |
-| **Otherwise** | Show Notification: "✗ Failed" → body: URL result |
+Before creating the automation, enable these on your iPhone:
 
-5. Enable these settings on iPhone:
-   - **Settings → Shortcuts → Allow Access to Messages** → On
-   - **Settings → Shortcuts → Allow Notifications** → On
-   - **Settings → General → Background App Refresh** → On
+- **Settings → Shortcuts → Allow Access to Messages** → On
+- **Settings → Shortcuts → Allow Notifications** → On
+- **Settings → General → Background App Refresh** → On
+
+### 2. Create the automation
+
+1. Open the **Shortcuts** app → tap **Automation** (bottom tab)
+2. Tap **+** → **New Automation** → scroll to **Message** under Communication
+3. **Sender** — leave blank (any sender)
+4. **Message Contains** — type a single space `" "` (required by iOS to enable Run Immediately)
+5. Toggle **Run Immediately** → On (tap "Don't Ask" to confirm)
+6. Tap **Next**
+
+### 3. Add actions
+
+Add the following actions in order:
+
+**Action 1 — Send the message to your worker**
+
+- Add **Get Contents of URL**
+- URL: `https://<your-worker>.workers.dev/messages`
+- Method: `POST`
+- Headers: add one header
+  - Key: `Authorization`
+  - Value: `Bearer <your-api-token>`
+- Request Body: `JSON`
+  - Add three fields:
+    | Key | Value |
+    |---|---|
+    | `text` | Shortcut Input → **Content** |
+    | `sender` | Shortcut Input → **Sender** |
+    | `chat_identifier` | Shortcut Input → **Sender** |
+
+**Action 2 — Parse the response**
+
+- Add **Get Dictionary from Input**
+  - Input: result of the URL action
+
+- Add **Get Dictionary Value**
+  - Key: `ok`
+  - Dictionary: result of previous action
+
+**Action 3 — Show result**
+
+- Add **If**
+  - Condition: Dictionary Value `is` `true`
+  - Add **Show Notification** inside If block:
+    - Title: `✓ Message forwarded`
+  - Add **Otherwise** block:
+  - Add **Show Notification** inside Otherwise block:
+    - Title: `✗ Forward failed`
+    - Body: Contents of URL (the raw error response)
+
+### 4. Save and test
+
+Tap **Done**. Send yourself a message from another device — you should see a "✓ Message forwarded" notification and the message appear in your D1 database.
+
+Verify with:
+
+```bash
+curl -H "Authorization: Bearer <api_token>" \
+  https://<worker>.workers.dev/messages
+```
 
 ## Querying messages
 
