@@ -155,6 +155,40 @@ curl -H "Authorization: Bearer <api_token>" \
   https://<worker>.workers.dev/messages
 ```
 
+## MCP setup
+
+imsg-mcp exposes an MCP server at `/mcp` for use with Claude Code or any MCP-compatible client.
+
+Copy the example and fill in your values:
+
+```bash
+cp .mcp.json.example .mcp.json
+```
+
+`.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "imsg-mcp": {
+      "type": "http",
+      "url": "https://<your-worker>.workers.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer <your-api-token>"
+      }
+    }
+  }
+}
+```
+
+`.mcp.json` is gitignored — it contains your credentials.
+
+### Available tools
+
+| Tool | Description |
+|---|---|
+| `get_messages(count?)` | Get the most recent iMessages (default 1, max 50) |
+
 ## Querying messages
 
 ```bash

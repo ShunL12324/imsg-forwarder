@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "imsg-mcp": {
+      "type": "http",
+      "url": "https://<your-worker>.workers.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer <your-api-token>"
+      }
+    }
+  }
+}
